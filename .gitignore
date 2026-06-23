@@ -1,0 +1,7 @@
+﻿output/
+.env
+__pycache__/
+*.pyc
+.playwright-mcp/
+~$*.docx
+*.zip
