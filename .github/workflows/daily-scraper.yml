@@ -100,7 +100,7 @@ jobs:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: |
           echo "=== Day 7: merging CSV + trend === "
-          python -c "
+          python << 'PYEOF'
           from week_manager import load_state, merge_weekly_csv, mark_trend_done
           state = load_state('week_cache')
           merge_weekly_csv(state, 'week_cache')
@@ -125,7 +125,7 @@ jobs:
               f.write(f'<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"><title>行业趋势分析</title><style>body{{font-family:Microsoft YaHei,sans-serif;max-width:900px;margin:40px auto;line-height:1.8}}</style></head><body><h1>行业趋势分析</h1>{trend}</body></html>')
           mark_trend_done('week_cache')
           print('Day 7 complete')
-          "
+          PYEOF
 
       - name: 上传本周数据artifact
         uses: actions/upload-artifact@v4
