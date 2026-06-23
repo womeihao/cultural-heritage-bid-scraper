@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       keyword:
-        description: '搜索关键词(逗号分隔, 留空则用20个默认关键词)'
+        description: '搜索关键词(逗号分隔,留空则用20个默认关键词)'
         required: false
         default: ''
       days:
@@ -12,9 +12,7 @@ on:
         required: false
         default: '1'
   schedule:
-    # 北京时间 00:00 = UTC 16:00
     - cron: '0 16 * * *'
-    # 北京时间 08:30 = UTC 00:30
     - cron: '30 0 * * *'
 
 jobs:
@@ -38,7 +36,7 @@ jobs:
         id: dt
         run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      - name: 下载上周数据artifact(如果有)
+      - name: 下载上周数据artifact
         uses: actions/download-artifact@v4
         with:
           name: week-data
@@ -54,7 +52,7 @@ jobs:
       - name: 下载附件
         run: python download_attachments.py --date ${{ steps.dt.outputs.today }}
 
-      - name: AI总结(模板1+2, 跳过模板3)
+      - name: AI总结(模板1+2跳过模板3)
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
         run: python ai_summarize.py --date ${{ steps.dt.outputs.today }} --skip-trend
@@ -62,70 +60,17 @@ jobs:
       - name: 周状态管理
         id: week
         run: |
-          # 合并当天数据到week_cache
           if [ -d "output/${{ steps.dt.outputs.today }}" ]; then
             mkdir -p week_cache/output
             cp -r "output/${{ steps.dt.outputs.today }}" "week_cache/output/"
           fi
-          # 从python脚本读取周状态
-          python << 'PYEOF'
-          import sys, os, json
-          wd = 'week_cache'
-          os.makedirs(wd, exist_ok=True)
-          sf = os.path.join(wd, 'week_state.json')
-          today = '${{ steps.dt.outputs.today }}'
-          if os.path.exists(sf):
-              with open(sf) as f:
-                  state = json.load(f)
-          else:
-              state = {'week_start': today, 'days_collected': 0, 'folders': [], 'trend_generated': False}
-          
-          if state.get('trend_generated') and state.get('days_collected',0) >= 7:
-              # 新的一周
-              state = {'week_start': today, 'days_collected': 0, 'folders': [], 'trend_generated': False}
-          
-          if today not in state.get('folders',[]):
-              state['folders'].append(today)
-          state['days_collected'] = len(state['folders'])
-          is_day7 = state['days_collected'] >= 7
-          
-          with open(sf, 'w') as f:
-              json.dump(state, f)
-          print(f'day7={is_day7}')
-          PYEOF
+          python week_manager.py add "${{ steps.dt.outputs.today }}" --data-dir week_cache
 
-      - name: 第7天: 合并CSV+行业趋势
+      - name: 第7天合并CSV加行业趋势
         if: contains(steps.week.outputs.day7, 'True')
         env:
           SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-        run: |
-          echo "=== Day 7: merging CSV + trend === "
-          python << 'PYEOF'
-          from week_manager import load_state, merge_weekly_csv, mark_trend_done
-          state = load_state('week_cache')
-          merge_weekly_csv(state, 'week_cache')
-          # 行业趋势分析
-          import json, os, urllib.request
-          from keywords import PROMPT_TREND_RADAR
-          out_dir = os.path.join('week_cache', 'output', state['folders'][-1])
-          all_s = []
-          for fld in state['folders']:
-              sp = os.path.join('week_cache', 'output', fld, 'summaries.json')
-              if os.path.exists(sp):
-                  with open(sp, encoding='utf-8') as f:
-                      all_s.extend(json.load(f))
-          inp = '\n\n'.join([f\"标题:{s['标题']}\n{s.get('AwardInsight','')[:500]}\" for s in all_s])[:6000]
-          payload = json.dumps({'model':'deepseek-ai/DeepSeek-V4-Flash','messages':[{'role':'user','content':PROMPT_TREND_RADAR+inp}],'max_tokens':2000,'temperature':0.3}).encode()
-          req = urllib.request.Request('https://api.siliconflow.cn/v1/chat/completions', data=payload, method='POST')
-          req.add_header('Authorization', f\"Bearer {os.environ['SILICONFLOW_API_KEY']}\")
-          req.add_header('Content-Type', 'application/json')
-          with urllib.request.urlopen(req, timeout=120) as resp:
-              trend = json.loads(resp.read()).get('choices',[{}])[0].get('message',{}).get('content','')
-          with open(os.path.join(out_dir,'行业趋势分析.html'), 'w', encoding='utf-8') as f:
-              f.write(f'<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"><title>行业趋势分析</title><style>body{{font-family:Microsoft YaHei,sans-serif;max-width:900px;margin:40px auto;line-height:1.8}}</style></head><body><h1>行业趋势分析</h1>{trend}</body></html>')
-          mark_trend_done('week_cache')
-          print('Day 7 complete')
-          PYEOF
+        run: python week_manager.py trend "${{ steps.dt.outputs.today }}" --data-dir week_cache
 
       - name: 上传本周数据artifact
         uses: actions/upload-artifact@v4
@@ -135,29 +80,24 @@ jobs:
           retention-days: 8
 
   push:
-    name: 早8:30飞书推送
+    name: 早8点半飞书推送
     if: github.event.schedule == '30 0 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: 安装依赖
         run: pip install -r requirements.txt
-
       - name: 设置日期
         id: dt
         run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
       - name: 下载本周数据artifact
         uses: actions/download-artifact@v4
         with:
           name: week-data
           path: week_cache/
-
       - name: 飞书推送
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
