@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 纯代码解析版多站并发爬虫 v4 — 无AI, 高效精确
@@ -573,34 +573,41 @@ class Scheduler:
 class Pipe:
     @staticmethod
     def filter(items):
-        out = []
-        for it in items:
-            if it.bid_type and any(k in it.bid_type for k in BID_KEYWORDS):
-                out.append(it)
-            elif it.bid_type == "废标公告":
-                out.append(it)
-            elif any(k in it.title for k in BID_KEYWORDS):
-                out.append(it)
-        return out
+          out = []
+          for it in items:
+              if it.bid_type and any(k in it.bid_type for k in BID_KEYWORDS):
+                  out.append(it)
+              elif it.bid_type == "废标公告":
+                  out.append(it)
+              elif any(k in it.title for k in BID_KEYWORDS):
+                  out.append(it)
+          return out
 
     @staticmethod
     def dedup(items):
-        fp_map = {}
-        unique = []
-        for it in items:
-            fp = it.fingerprint()
-            if fp not in fp_map:
-                fp_map[fp] = len(unique)
-                unique.append(it)
-            else:
-                existing = unique[fp_map[fp]]
-                for k in Item.__slots__:
-                    if not getattr(existing, k) and getattr(it, k):
-                        setattr(existing, k, getattr(it, k))
-                for k in ("buyer","agent","supplier","supplier_addr","amount","date","region","bid_type"):
-                    if not getattr(existing, k) and getattr(it, k):
-                        setattr(existing, k, getattr(it, k))
-        return unique
+          fp_map = {}
+          unique = []
+          for it in items:
+              fp = it.fingerprint()
+              if fp not in fp_map:
+                  fp_map[fp] = len(unique)
+                  unique.append(it)
+              else:
+                  existing = unique[fp_map[fp]]
+                  for k in Item.__slots__:
+                      if not getattr(existing, k) and getattr(it, k):
+                          setattr(existing, k, getattr(it, k))
+                  for k in ("buyer","agent","supplier","supplier_addr","amount","date","region","bid_type"):
+                      if not getattr(existing, k) and getattr(it, k):
+                          setattr(existing, k, getattr(it, k))
+          return unique
+
+    @staticmethod
+    def domain_filter(items):
+        """域名筛选: 标题须含文物/博物馆/文化遗产等关键词"""
+        if not DOMAIN_FILTER:
+            return items
+        return [it for it in items if any(k in it.title for k in DOMAIN_FILTER)]
 
     @staticmethod
     def sort(items):
