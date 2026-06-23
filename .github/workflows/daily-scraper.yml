@@ -68,7 +68,7 @@ jobs:
             cp -r "output/${{ steps.dt.outputs.today }}" "week_cache/output/"
           fi
           # 从python脚本读取周状态
-          python -c "
+          python << 'PYEOF'
           import sys, os, json
           wd = 'week_cache'
           os.makedirs(wd, exist_ok=True)
@@ -92,7 +92,7 @@ jobs:
           with open(sf, 'w') as f:
               json.dump(state, f)
           print(f'day7={is_day7}')
-          "
+          PYEOF
 
       - name: 第7天: 合并CSV+行业趋势
         if: contains(steps.week.outputs.day7, 'True')
