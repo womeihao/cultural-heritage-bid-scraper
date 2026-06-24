@@ -1,5 +1,5 @@
-﻿# -*- coding: utf-8 -*-
-"""飞书推送模块 — 卡片消息 + zip附件(含AI总结HTML+附件PDF)
+# -*- coding: utf-8 -*-
+"""飞书推送模块 — 卡片消息 + zip附件(AI总结HTML+附件PDF+Day7本周汇总)
 环境变量: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_CHAT_ID
 用法: python feishu_push.py --date 2026-06-23
 """
@@ -145,12 +145,18 @@ def build_card(date_str, items, is_day7=False):
         "elements": elements
     }
 
-def _pack_zip(out_dir, zip_name):
-    """打包zip: 仅含CSV+AI总结HTML+附件子文件夹, 排除json"""
+def _pack_zip(out_dir, zip_name, day7=False):
+    """打包zip: CSV+AI总结HTML+附件子文件夹
+    常规日: 排除 json
+    第7天: 额外确保 本周文物数字化汇总.csv + 行业趋势分析.html 已打包"""
     zip_path = os.path.join(out_dir, zip_name)
+    # 排除自身zip(动态名称) + 静态排除列表
     skip_names = {"attachments.json", "文物数字化.json", "summaries.json",
-                  "文物数字化_new.csv", "daily-report.zip"}
+                  "文物数字化_new.csv", "daily-report.zip", zip_name}
     skip_prefixes = ("~$", ".~")
+
+    if day7:
+        log("  [Day7] 本周汇总CSV + 行业趋势HTML 将一并打包")
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(out_dir):
@@ -181,13 +187,15 @@ def run(date_str=None):
     if not token:
         return
 
-    # 读取周状态
+    # 读取周状态: 优先从 week_cache, 回退到 data
     from week_manager import load_state, is_day7, get_zip_name
-    state = load_state("data")
+    state = load_state("week_cache")
+    if not state.get("folders"):
+        state = load_state("data")
     day7 = is_day7(state)
     zip_name = get_zip_name(date_str, day7)
 
-    # 查找JSON: 依次搜索 week_cache/ > data/ > output/ > 本地的output/
+    # 查找JSON: 依次搜索 week_cache/ > data/ > output/
     search_dirs = [
         os.path.join("week_cache", "output", date_str),
         os.path.join("data", "output", date_str),
@@ -218,9 +226,8 @@ def run(date_str=None):
     else:
         log(f"  ❌ 卡片消息失败: {result.get('msg', '')}")
 
-    # 2. 打包zip(排除json)
-    work_out = os.path.dirname(json_path)
-    zip_path = _pack_zip(work_out, zip_name)
+    # 2. 打包zip
+    zip_path = _pack_zip(work_out, zip_name, day7=day7)
 
     # 3. 发送zip
     file_key = _upload_file(token, zip_path)
