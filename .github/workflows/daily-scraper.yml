@@ -82,6 +82,7 @@ jobs:
   push:
     name: 早8点半飞书推送
     if: github.event.schedule == '30 0 * * *' || github.event_name == 'workflow_dispatch'
+    needs: collect  # 确保collect完成上传artifact后再执行push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +99,7 @@ jobs:
         with:
           name: week-data
           path: week_cache/
+        continue-on-error: true
       - name: 飞书推送
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
