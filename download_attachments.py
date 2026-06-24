@@ -136,7 +136,7 @@ def run(date_str=None):
         date_str = datetime.now().strftime("%Y-%m-%d")
 
     base = getattr(a, 'base_dir', None) or ''
-out_dir = os.path.join(base, 'output', date_str) if base else os.path.join('output', date_str)
+    out_dir = os.path.join(base, 'output', date_str) if base else os.path.join('output', date_str)
     json_path = os.path.join(out_dir, "文物数字化.json")
 
     if not os.path.exists(json_path):
