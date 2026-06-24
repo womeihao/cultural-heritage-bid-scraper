@@ -194,38 +194,78 @@ def parse_ccgp_detail(html, url=""):
             if m:
                 result["amount"] = f"{float(m.group(1)):.2f}"
 
-        # 如果正文纯文本没找到供应商, 从正文表格中找
+        # 如果正文纯文本没找到供应商, 从正文表格中找 (v5 TSV-aware)
         if not result.get("supplier"):
-            for t in dc.find_all("table"):
-                cls = " ".join(t.get("class", []))
-                ths = [th.get_text(strip=True) for th in t.find_all("th")]
-                # 找含"供应商名称"表头的表
-                if any("供应商名称" in th for th in ths) or "winningSupplier" in cls.lower() or "中标" in cls or "成交" in cls:
-                    header_idx = {}
-                    for i, th in enumerate(t.find_all("th")):
-                        header_idx[th.get_text(strip=True)] = i
-                    for row in t.find_all("tr"):
-                        cells = row.find_all("td")
-                        if len(cells) < 2:
-                            continue
-                        for i, c in enumerate(cells):
-                            txt = c.get_text(strip=True)
-                            cls_c = " ".join(c.get("class", []))
-                            hdr = ths[i] if i < len(ths) else ""
-                            if ("winningSupplierName" in cls_c or "供应商名称" in hdr) and "地址" not in hdr:
-                                if txt and len(txt) > 2 and "名称" not in txt:
-                                    result["supplier"] = clean_supplier(txt)
-                            elif "winningSupplierAddr" in cls_c or "供应商地址" in hdr:
-                                if txt and len(txt) > 2 and "地址" not in txt[:3]:
-                                    result["supplier_addr"] = txt
-                            elif ("summaryPrice" in cls_c or "金额" in hdr) and not result.get("amount") and "元" in txt:
-                                if not result.get("amount"):
-                                    result["amount"] = norm_amount(txt)
-                        if result.get("supplier"):
-                            break
+            tables = dc.find_all("table")
+            for t in tables:
+                rows = t.find_all("tr")
+                if len(rows) < 2:
+                    continue
+                # 解析表头: 第一行可能是 th 或 td
+                hcells = rows[0].find_all(["th","td"])
+                headers = [h.get_text(strip=True) for h in hcells]
+                # 检查是否含供应商/金额相关列
+                if not any("供应商" in h or "中标" in h or "成交" in h or "金额" in h for h in headers):
+                    continue
+                # 找列索引
+                idx_sup = next((i for i,h in enumerate(headers) if "供应商名称" in h and "地址" not in h), None)
+                idx_addr = next((i for i,h in enumerate(headers) if "供应商地址" in h), None)
+                idx_amt = next((i for i,h in enumerate(headers) if ("金额" in h and ("中标" in h or "成交" in h))), None)
+                if idx_amt is None:
+                    idx_amt = next((i for i,h in enumerate(headers) if "金额" in h), None)
+                # 解析数据行
+                for row in rows[1:]:
+                    cells = row.find_all("td")
+                    max_idx = max([x for x in [idx_sup,idx_addr,idx_amt] if x is not None] or [0])
+                    if len(cells) <= max_idx:
+                        continue
+                    if idx_sup is not None and not result.get("supplier"):
+                        txt = cells[idx_sup].get_text(strip=True)
+                        if txt and len(txt) > 1:
+                            result["supplier"] = clean_supplier(txt)
+                    if idx_addr is not None and not result.get("supplier_addr"):
+                        txt = cells[idx_addr].get_text(strip=True)
+                        if txt and len(txt) > 2:
+                            result["supplier_addr"] = txt
+                    if idx_amt is not None and not result.get("amount"):
+                        txt = cells[idx_amt].get_text(strip=True)
+                        if txt:
+                            result["amount"] = norm_amount(txt)
                     if result.get("supplier"):
                         break
+                if result.get("supplier"):
+                    break
 
+            # 如果新逻辑没找到, 用旧class-based逻辑兜底
+            if not result.get("supplier"):
+                for t in tables:
+                    cls = " ".join(t.get("class", []))
+                    ths = [th.get_text(strip=True) for th in t.find_all("th")]
+                    if any("供应商名称" in th for th in ths) or "winningSupplier" in cls.lower() or "中标" in cls or "成交" in cls:
+                        header_idx = {}
+                        for i, th in enumerate(t.find_all("th")):
+                            header_idx[th.get_text(strip=True)] = i
+                        for row in t.find_all("tr"):
+                            cells = row.find_all("td")
+                            if len(cells) < 2:
+                                continue
+                            for i, c in enumerate(cells):
+                                txt = c.get_text(strip=True)
+                                cls_c = " ".join(c.get("class", []))
+                                hdr = ths[i] if i < len(ths) else ""
+                                if ("winningSupplierName" in cls_c or "供应商名称" in hdr) and "地址" not in hdr:
+                                    if txt and len(txt) > 2 and "名称" not in txt:
+                                        result["supplier"] = clean_supplier(txt)
+                                elif "winningSupplierAddr" in cls_c or "供应商地址" in hdr:
+                                    if txt and len(txt) > 2 and "地址" not in txt[:3]:
+                                        result["supplier_addr"] = txt
+                                elif ("summaryPrice" in cls_c or "金额" in hdr) and not result.get("amount") and "元" in txt:
+                                    if not result.get("amount"):
+                                        result["amount"] = norm_amount(txt)
+                            if result.get("supplier"):
+                                break
+                    if result.get("supplier"):
+                        break
     # ▶ 2. 再从公告概要(div.table)补充正文没有的字段
     tbl = soup.find("div", class_="table") or soup.find("table", bgcolor="#bfbfbf")
     if tbl:
@@ -253,7 +293,15 @@ def parse_ccgp_detail(html, url=""):
                 elif label == "总中标金额" and not result.get("amount"):
                     result["amount"] = norm_amount(val)
 
-    # ▶ 3. 从正文第九部分(联系人信息)补充采购人/代理机构
+    
+    # ▶ 3.5 数据来源精确化 — 从页面"来源"行提取
+    if url and "ccgp.gov.cn" in url:
+        m = re.search(r"来源[：:]\s*(.{4,30}(?:分网|总网|平台))", soup.get_text(" ", strip=True))
+        if m:
+            result["source_name"] = m.group(1).strip()
+        else:
+            result["source_name"] = "中国政府采购网"
+# ▶ 3. 从正文第九部分(联系人信息)补充采购人/代理机构
     if not result.get("buyer") or not result.get("agent"):
         full_text = soup.get_text(" ", strip=True)
         m = re.search(r"采购人信息\s*名?\s*称[：:]\s*([^\s地]{3,30})", full_text)
@@ -262,6 +310,14 @@ def parse_ccgp_detail(html, url=""):
         m = re.search(r"采购代理机构信息\s*名?\s*称[：:]\s*([^\s地]{3,40})", full_text)
         if m and not result.get("agent"):
             result["agent"] = m.group(1).strip()
+
+    # ▶ 3.5 数据来源精确化 — 从页面"来源"行提取
+    if url and "ccgp.gov.cn" in url:
+        m = re.search(r"来源[：:]\s*(.{4,30}(?:分网|总网|平台))", soup.get_text(" ", strip=True))
+        if m:
+            result["source_name"] = m.group(1).strip()
+        else:
+            result["source_name"] = "中国政府采购网"
 
     # ▶ 4. 公告类型 + 废标检测
     title = result.get("title", "")
@@ -479,7 +535,12 @@ class GgzyScraper:
                     url = "https://www.ggzy.gov.cn" + url
                 item.url = url.replace("/a/", "/b/") if url else ""
                 item.date = norm_date(rec.get("publishTime", ""))
-                item.region = rec.get("provinceText", "") or rec.get("cityText", "")
+                province = rec.get("provinceText", "")
+                city = rec.get("cityText", "")
+                if province:
+                    item.region = f"{province}{city}" if city and not city.startswith(province) else (province or city)
+                else:
+                    item.region = city
 
                 itype = rec.get("informationTypeText", "")
                 if "中标" in itype:
