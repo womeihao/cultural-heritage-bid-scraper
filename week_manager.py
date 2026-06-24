@@ -1,248 +1,210 @@
 # -*- coding: utf-8 -*-
-"""飞书推送模块 — 卡片消息 + zip附件(AI总结HTML+附件PDF+Day7本周汇总)
-环境变量: FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_CHAT_ID
-用法: python feishu_push.py --date 2026-06-23
+"""周状态管理模块 + CLI
+用法:
+  python week_manager.py add <date> --data-dir week_cache
+  python week_manager.py trend <date> --data-dir week_cache
 """
 
-import os, json, argparse, urllib.request, urllib.error, zipfile, glob
-from datetime import datetime
+import os, json, csv, shutil, re, urllib.request
+from datetime import datetime, timedelta
 
-FEISHU_BASE = "https://open.feishu.cn/open-apis"
+STATE_FILE = "week_state.json"
 
-def log(*a):
-    print(*a, flush=True)
+def load_state(data_dir="data"):
+    path = os.path.join(data_dir, STATE_FILE)
+    if not os.path.exists(path):
+        return {"week_start": "", "days_collected": 0, "folders": [], "trend_generated": False}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def _post(url, data=None, headers=None, method="POST"):
-    h = {"Content-Type": "application/json; charset=utf-8"}
-    if headers:
-        h.update(headers)
-    body = json.dumps(data).encode("utf-8") if data else None
-    req = urllib.request.Request(url, data=body, headers=h, method=method)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def save_state(state, data_dir="data"):
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, STATE_FILE)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
-def _get_token():
-    app_id = os.environ.get("FEISHU_APP_ID", "")
-    app_secret = os.environ.get("FEISHU_APP_SECRET", "")
-    if not app_id or not app_secret:
-        log("[ERROR] FEISHU_APP_ID 或 FEISHU_APP_SECRET 未设置")
+def is_day7(state):
+    return state.get("days_collected", 0) >= 7
+
+def should_reset(state):
+    return state.get("trend_generated", False) and state.get("days_collected", 0) >= 7
+
+def today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+def yesterday_str():
+    return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+def start_week(date_str=None):
+    d = date_str or today_str()
+    return {"week_start": d, "days_collected": 0, "folders": [], "trend_generated": False}
+
+def add_day(date_str, data_dir="data"):
+    state = load_state(data_dir)
+    if should_reset(state):
+        _clean_old_week(state, data_dir)
+        state = start_week(date_str)
+    if not state.get("week_start"):
+        state = start_week(date_str)
+    folders = state.get("folders", [])
+    if date_str not in folders:
+        folders.append(date_str)
+    state["folders"] = folders
+    state["days_collected"] = len(folders)
+    state["week_start"] = state["week_start"] or date_str
+    save_state(state, data_dir)
+    return is_day7(state), state
+
+def mark_trend_done(data_dir="data"):
+    state = load_state(data_dir)
+    state["trend_generated"] = True
+    save_state(state, data_dir)
+    return state
+
+def _clean_old_week(state, data_dir="data"):
+    output_dir = os.path.join(data_dir, "output")
+    if not os.path.isdir(output_dir):
+        return
+    for folder in state.get("folders", []):
+        path = os.path.join(output_dir, folder)
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+
+def merge_weekly_csv(state, data_dir="data"):
+    output_dir = os.path.join(data_dir, "output")
+    folders = state.get("folders", [])
+    if len(folders) < 2:
         return None
-    result = _post(f"{FEISHU_BASE}/auth/v3/tenant_access_token/internal", {
-        "app_id": app_id, "app_secret": app_secret
-    })
-    if result.get("code") != 0:
-        log(f"[ERROR] 获取token失败: {result}")
+    all_rows = []
+    header = None
+    for folder in folders:
+        csv_path = os.path.join(output_dir, folder, "文物数字化.csv")
+        if not os.path.exists(csv_path):
+            continue
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            lines = list(reader)
+        if not lines:
+            continue
+        if header is None:
+            header = lines[0]
+        for row in lines[1:]:
+            if row and any(c.strip() for c in row):
+                all_rows.append(row)
+    if not header or not all_rows:
         return None
-    return result["tenant_access_token"]
+    last_folder = folders[-1]
+    merge_path = os.path.join(output_dir, last_folder, "本周文物数字化汇总.csv")
+    with open(merge_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(all_rows)
+    return merge_path
 
-def _send_message(token, chat_id, msg_type, content):
-    result = _post(
-        f"{FEISHU_BASE}/im/v1/messages?receive_id_type=chat_id",
-        {"receive_id": chat_id, "msg_type": msg_type, "content": json.dumps(content)},
-        {"Authorization": f"Bearer {token}"}
-    )
-    return result
-
-def _upload_file(token, file_path):
-    filename = os.path.basename(file_path)
-    ext = os.path.splitext(filename)[1].lower().lstrip(".")
-    if ext in ("pdf","doc","docx","xls","xlsx","ppt","pptx","mp4","jpg","jpeg","png","mp3","wav"):
-        file_type = ext
-    else:
-        file_type = "stream"
-
-    with open(file_path, "rb") as f:
-        file_data = f.read()
-
-    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file_type"\r\n\r\n'
-        f"{file_type}\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file_name"\r\n\r\n'
-        f"{filename}\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-        f"Content-Type: application/octet-stream\r\n\r\n"
-    ).encode("utf-8") + file_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-    req = urllib.request.Request(
-        f"{FEISHU_BASE}/im/v1/files",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}"
-        },
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        if result.get("code") != 0:
-            log(f"[ERROR] 文件上传失败: {result.get('msg','')}")
-            return None
-        return result.get("data", {}).get("file_key")
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", "replace")
-        log(f"[ERROR] 文件上传HTTP {e.code}: {err_body[:200]}")
-        return None
-
-def build_card(date_str, items, is_day7=False):
-    """构建飞书卡片"""
-    total = len(items)
-    elements = []
-
-    if is_day7:
-        title_text = f"**📋 文物数字化中标信息日报 {date_str} (本周第7天)**\n\n共 {total} 条中标/成交公告"
-    else:
-        title_text = f"**📋 文物数字化中标信息日报 {date_str}**\n\n共 {total} 条中标/成交公告"
-
-    elements.append({
-        "tag": "div",
-        "text": {"tag": "lark_md", "content": title_text}
-    })
-    elements.append({"tag": "hr"})
-
-    for i, item in enumerate(items[:10], 1):
-        title = item.get("标题", "")
-        buyer = item.get("采购人", "N/A")
-        supplier = item.get("供应商", "N/A")
-        amount = item.get("中标金额(万)", "N/A")
-        region = item.get("地区", "")
-        bid_type = item.get("公告类型", "")
-        url = item.get("原文链接", "")
-
-        content = f"**{i}. {title}**\n"
-        content += f"📍 {region} | {bid_type} | 💰 {amount}万\n"
-        content += f"🏢 采购人: {buyer}\n"
-        content += f"🏭 供应商: {supplier}\n"
-        content += f"🤖 AI总结: 见附件zip\n"
-        content += f"🔗 [查看原文公告]({url})"
-
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
-        elements.append({"tag": "hr"})
-
-    if total > 10:
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"📊 还有 {total-10} 条, 完整数据见附件zip"}
-        })
-
-    if is_day7:
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md",
-                "content": "📊 **本周行业趋势分析已生成**\n包含7天汇总CSV + 行业趋势分析报告, 见附件zip"}
-        })
-
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": f"文物数字化中标日报 {date_str}"},
-            "template": "blue"
-        },
-        "elements": elements
-    }
-
-def _pack_zip(out_dir, zip_name, day7=False):
-    """打包zip: CSV+AI总结HTML+附件子文件夹
-    常规日: 排除 json
-    第7天: 额外确保 本周文物数字化汇总.csv + 行业趋势分析.html 已打包"""
-    zip_path = os.path.join(out_dir, zip_name)
-    skip_names = {"attachments.json", "文物数字化.json", "summaries.json",
-                  "文物数字化_new.csv", "daily-report.zip"}
-    skip_prefixes = ("~$", ".~")
-
+def get_zip_name(date_str, day7):
     if day7:
-        log("  [Day7] 本周汇总CSV + 行业趋势HTML 将一并打包")
+        return f"{date_str}_文物数字化本周汇总.zip"
+    return f"{date_str}_文物数字化中标信息.zip"
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(out_dir):
-            for f in files:
-                if f in skip_names or f.startswith(skip_prefixes):
-                    continue
-                fp = os.path.join(root, f)
-                arcname = os.path.relpath(fp, os.path.dirname(out_dir))
-                try:
-                    zf.write(fp, arcname)
-                except Exception as e:
-                    log(f"  SKIP {arcname}: {e}")
+def get_output_dir(data_dir="data"):
+    return os.path.join(data_dir, "output", today_str())
 
-    size_mb = os.path.getsize(zip_path) / (1024 * 1024)
-    log(f"  zip: {zip_name} ({size_mb:.1f}MB)")
-    return zip_path
+def run_trend(date_str, data_dir="data"):
+    """第7天: 合并CSV + AI行业趋势分析(含token截断保护)"""
+    state = load_state(data_dir)
+    merge_result = merge_weekly_csv(state, data_dir)
+    if merge_result:
+        print(f"  [OK] 合并CSV: {merge_result}")
 
-def run(date_str=None):
-    if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+    output_dir = os.path.join(data_dir, "output")
+    last_folder = state["folders"][-1]
+    out_dir = os.path.join(output_dir, last_folder)
 
-    chat_id = os.environ.get("FEISHU_CHAT_ID", "")
-    if not chat_id:
-        log("[ERROR] FEISHU_CHAT_ID 未设置")
+    # 收集7天所有summaries
+    all_s = []
+    for fld in state["folders"]:
+        sp = os.path.join(output_dir, fld, "summaries.json")
+        if os.path.exists(sp):
+            with open(sp, encoding="utf-8") as f:
+                all_s.extend(json.load(f))
+
+    if not all_s:
+        print("  [!] 无AI总结数据, 跳过行业趋势分析")
+        mark_trend_done(data_dir)
         return
 
-    token = _get_token()
-    if not token:
+    print(f"  [*] 行业趋势分析: {len(all_s)}条公告数据")
+
+    try:
+        from keywords import PROMPT_TREND_RADAR
+    except ImportError:
+        PROMPT_TREND_RADAR = "Analyze the following procurement announcements and generate a trend report in Chinese."
+
+    # Token截断: 最多30条, 每条200字符, 总计4000字符
+    all_s = all_s[:30]
+    inp = '\n\n'.join([f"标题:{s['标题']}\n{s.get('AwardInsight','')[:200]}" for s in all_s])[:4000]
+
+    api_key = os.environ.get("SILICONFLOW_API_KEY", "")
+    if not api_key:
+        print("  [!] SILICONFLOW_API_KEY 未设置")
+        mark_trend_done(data_dir)
         return
 
-    # 读取周状态: 优先从 week_cache, 回退到 data
-    from week_manager import load_state, is_day7, get_zip_name
-    state = load_state("week_cache")
-    if not state.get("folders"):
-        state = load_state("data")
-    day7 = is_day7(state)
-    zip_name = get_zip_name(date_str, day7)
+    payload = json.dumps({
+        'model': 'deepseek-ai/DeepSeek-V4-Flash',
+        'messages': [{'role': 'user', 'content': PROMPT_TREND_RADAR + inp}],
+        'max_tokens': 4096,
+        'temperature': 0.3
+    }).encode()
 
-    # 查找JSON: 依次搜索 week_cache/ > data/ > output/
-    search_dirs = [
-        os.path.join("week_cache", "output", date_str),
-        os.path.join("data", "output", date_str),
-        os.path.join("output", date_str),
-    ]
-    json_path = ""
-    for d in search_dirs:
-        p = os.path.join(d, "文物数字化.json")
-        if os.path.exists(p):
-            json_path = p
-            break
-    if not json_path:
-        log(f"[!] 未找到JSON in {search_dirs}")
+    req = urllib.request.Request('https://api.siliconflow.cn/v1/chat/completions', data=payload, method='POST')
+    req.add_header('Authorization', f"Bearer {api_key}")
+    req.add_header('Content-Type', 'application/json')
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            trend = json.loads(resp.read()).get('choices',[{}])[0].get('message',{}).get('content','')
+    except Exception as e:
+        print(f"  [ERROR] AI趋势分析失败: {e}")
+        mark_trend_done(data_dir)
         return
-    work_out = os.path.dirname(json_path)
-    log(f"  数据源: {work_out}")
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        items = json.load(f)
+    html_path = os.path.join(out_dir, '行业趋势分析.html')
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(f'<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>行业趋势分析</title><style>body{{font-family:Microsoft YaHei,sans-serif;max-width:900px;margin:40px auto;line-height:1.8}}</style></head><body><h1>行业趋势分析</h1>{trend}</body></html>')
+    print(f"  [OK] 行业趋势分析: {html_path}")
 
-    log(f"[*] 推送飞书: {len(items)}条公告 | 第{state.get('days_collected',0)}天 | day7={day7}")
+    mark_trend_done(data_dir)
+    print("  Day 7 complete")
 
-    # 1. 发送卡片
-    card = build_card(date_str, items, day7)
-    result = _send_message(token, chat_id, "interactive", card)
-    if result.get("code") == 0:
-        log("  ✅ 卡片消息发送成功")
-    else:
-        log(f"  ❌ 卡片消息失败: {result.get('msg', '')}")
 
-    # 2. 打包zip
-    zip_path = _pack_zip(work_out, zip_name, day7=day7)
-
-    # 3. 发送zip
-    file_key = _upload_file(token, zip_path)
-    if file_key:
-        result = _send_message(token, chat_id, "file", {"file_key": file_key})
-        if result.get("code") == 0:
-            log("  ✅ 附件发送成功")
-        else:
-            log(f"  ❌ 附件发送失败: {result.get('msg', '')}")
-    else:
-        log("  ❌ 附件上传失败")
-
-    log(f"\n[*] 飞书推送完成")
-
+# ═════ CLI ═════
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="飞书推送模块")
-    p.add_argument("--date", default=None, help="日期 YYYY-MM-DD")
-    a = p.parse_args()
-    run(a.date)
+    import argparse
+    p = argparse.ArgumentParser(description="周状态管理")
+    sp = p.add_subparsers(dest="cmd", required=True)
+
+    sp_add = sp.add_parser("add", help="追加一天")
+    sp_add.add_argument("date", help="日期 YYYY-MM-DD")
+    sp_add.add_argument("--data-dir", default="data", help="数据目录")
+
+    sp_trend = sp.add_parser("trend", help="第7天合并CSV和行业趋势")
+    sp_trend.add_argument("date", help="日期 YYYY-MM-DD")
+    sp_trend.add_argument("--data-dir", default="data", help="数据目录")
+
+    args = p.parse_args()
+
+    if args.cmd == "add":
+        is_day7_flag, state = add_day(args.date, args.data_dir)
+        print(f"day7={is_day7_flag}")
+        print(f"week_start={state['week_start']}")
+        print(f"days_collected={state['days_collected']}")
+
+    elif args.cmd == "trend":
+        state = load_state(args.data_dir)
+        if not is_day7(state):
+            print("[!] 不是第7天, 跳过")
+            print("day7=False")
+        else:
+            run_trend(args.date, args.data_dir)
+            print("day7=True")
