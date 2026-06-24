@@ -493,6 +493,12 @@ class CcgpScraper:
                 time.sleep(5)
             if html:
                 d = parse_ccgp_detail(html, item.url)
+                if d.get("source_name"):
+                    item.source = d["source_name"]
+                if item.region and not any(p in item.region for p in ["省","自治区","北京","天津","上海","重庆"]):
+                    m = re.search(r"([\u4e00-\u9fff]{2,4}(?:省|自治区|北京|天津|上海|重庆))", item.source)
+                    if m:
+                        item.region = m.group(1) + item.region
                 for k in ("buyer", "agent", "supplier", "supplier_addr", "amount", "date", "region", "bid_type"):
                     if d.get(k):
                         setattr(item, k, d[k])
