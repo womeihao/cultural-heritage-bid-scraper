@@ -13,7 +13,7 @@ v4改进:
 
 import re, csv, json, time, threading, hashlib, argparse, random
 import urllib.request, urllib.parse, urllib.error
-from datetime import datetime, timezone, timedelta, timezone, timezone, timezone
+from datetime import datetime, timezone, timedelta
 BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
