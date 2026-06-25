@@ -5,7 +5,8 @@
 """
 
 import os, json, argparse, urllib.request, urllib.error, zipfile, glob
-from datetime import datetime
+from datetime import datetime, timezone
+BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 
@@ -176,7 +177,7 @@ def _pack_zip(out_dir, zip_name, day7=False):
 
 def run(date_str=None):
     if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now(BJ_TZ).strftime("%Y-%m-%d")
 
     chat_id = os.environ.get("FEISHU_CHAT_ID", "")
     if not chat_id:
