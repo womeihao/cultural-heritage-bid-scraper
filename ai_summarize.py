@@ -7,7 +7,8 @@
 
 import os, re, json, time, argparse, zipfile
 import urllib.request, urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
+BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 
 # ═══ Config ═══
 API_URL = "https://api.siliconflow.cn/v1/chat/completions"
@@ -218,7 +219,7 @@ def trend_radar(summaries, out_dir):
 
 def run(date_str=None, skip_trend=False):
     if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now(BJ_TZ).strftime("%Y-%m-%d")
 
     base = os.environ.get("DATA_BASE", "")
     out_dir = os.path.join(base, "output", date_str) if base else os.path.join("output", date_str)
