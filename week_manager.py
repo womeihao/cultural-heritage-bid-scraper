@@ -6,7 +6,7 @@
 """
 
 import os, json, csv, shutil, re, urllib.request
-from datetime import datetime, timezone, timedelta, timezone, timezone, timezone
+from datetime import datetime, timezone, timedelta
 BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 
 STATE_FILE = "week_state.json"
