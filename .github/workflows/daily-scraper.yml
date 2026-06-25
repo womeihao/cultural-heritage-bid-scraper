@@ -81,7 +81,7 @@ jobs:
 
   push:
     name: 早8点半飞书推送
-    if: github.event.schedule == '30 0 * * *' || github.event_name == 'workflow_dispatch'
+    if: always() && (github.event.schedule == '30 0 * * *' || github.event_name == 'workflow_dispatch')
     needs: collect  # 确保collect完成上传artifact后再执行push
     runs-on: ubuntu-latest
     steps:
