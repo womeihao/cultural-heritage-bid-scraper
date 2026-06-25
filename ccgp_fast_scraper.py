@@ -13,7 +13,8 @@ v4改进:
 
 import re, csv, json, time, threading, hashlib, argparse, random
 import urllib.request, urllib.parse, urllib.error
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta, timezone, timezone, timezone
+BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import os
@@ -150,7 +151,7 @@ def is_within_days(date_str, days=7):
     d = parse_date_obj(date_str)
     if not d:
         return True  # 无法解析的保留
-    now = datetime.now()
+    now = datetime.now(BJ_TZ)
     return (now - d).days <= days
 
 # ═════ CCGP详情解析 — 正文优先 ═════
@@ -418,7 +419,7 @@ class CcgpScraper:
     REF = "https://www.ccgp.gov.cn/"
 
     def search(self, kw, days=7):
-        end_date = datetime.now() - timedelta(days=1)
+        end_date = datetime.now(BJ_TZ) - timedelta(days=1)
         start_date = end_date - timedelta(days=days-1) if days > 1 else end_date
         params = {
             "searchtype": "2", "bidType": "0", "kw": kw,
@@ -713,7 +714,7 @@ def main():
     kw_clean = re.sub(r'[\\\/:*?"<>|]', "_", keywords[0])[:20]
 
     # 输出目录: output/YYYY-MM-DD/
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = datetime.now(BJ_TZ).strftime("%Y-%m-%d")
     out_dir = os.path.join("output", today_str)
     os.makedirs(out_dir, exist_ok=True)
     prefix = a.output or os.path.join(out_dir, kw_clean)
