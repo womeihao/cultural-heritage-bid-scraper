@@ -5,7 +5,7 @@
 """
 
 import os, json, argparse, urllib.request, urllib.error, zipfile, glob
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
