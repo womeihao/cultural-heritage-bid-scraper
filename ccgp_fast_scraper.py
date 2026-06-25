@@ -124,7 +124,7 @@ def parse_date_obj(s):
     m = re.search(r"(\d{4})[/.年-](\d{1,2})[/.月-](\d{1,2})", str(s))
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=BJ_TZ)
         except:
             pass
     return None
