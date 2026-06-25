@@ -5,7 +5,8 @@
 
 import os, re, json, time, argparse, hashlib
 import urllib.request, urllib.error, urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
+BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 from bs4 import BeautifulSoup
 
 TIMEOUT = 30
@@ -143,7 +144,7 @@ def get_file_extension(url, name=""):
 
 def run(date_str=None):
     if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now(BJ_TZ).strftime("%Y-%m-%d")
 
     out_dir = os.path.join('output', date_str)
     json_path = os.path.join(out_dir, "文物数字化.json")
