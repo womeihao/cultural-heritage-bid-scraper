@@ -11,8 +11,18 @@ on:
         description: '爬取天数(生产模式1天,开发可调)'
         required: false
         default: '1'
+      collect_time:
+        description: '收集时间(北京时间 HH:MM,留空=立即)'
+        required: false
+        default: ''
+      push_time:
+        description: '推送时间(北京时间 HH:MM,留空=立即)'
+        required: false
+        default: ''
   schedule:
+    # 北京时间 00:00 = UTC 16:00
     - cron: '0 16 * * *'
+    # 北京时间 08:30 = UTC 00:30
     - cron: '30 0 * * *'
 
 jobs:
@@ -22,6 +32,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: 等待到指定时间(仅手动触发)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.collect_time != ''
+        run: |
+          echo "目标时间(北京): ${{ github.event.inputs.collect_time }}"
+          target_utc=$(TZ='Asia/Shanghai' date -d "${{ github.event.inputs.collect_time }}" +%s 2>/dev/null || echo 0)
+          now_utc=$(date +%s)
+          wait_sec=$((target_utc - now_utc))
+          if [ $wait_sec -gt 0 ] && [ $wait_sec -lt 21600 ]; then
+            echo "等待 ${wait_sec}s..."
+            sleep $wait_sec
+          elif [ $wait_sec -ge 21600 ]; then
+            echo "⚠️ 延迟超过6h, GitHub Actions会超时, 跳过等待"
+          else
+            echo "目标时间已过, 立即执行"
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -80,26 +106,47 @@ jobs:
           retention-days: 8
 
   push:
-    name: 早8点半飞书推送
+    name: 早8:30飞书推送
     if: always() && (github.event.schedule == '30 0 * * *' || github.event_name == 'workflow_dispatch')
-    needs: collect  # 确保collect完成上传artifact后再执行push
+    needs: collect
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: 等待到指定时间(仅手动触发)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.push_time != ''
+        run: |
+          echo "目标时间(北京): ${{ github.event.inputs.push_time }}"
+          target_utc=$(TZ='Asia/Shanghai' date -d "${{ github.event.inputs.push_time }}" +%s 2>/dev/null || echo 0)
+          now_utc=$(date +%s)
+          wait_sec=$((target_utc - now_utc))
+          if [ $wait_sec -gt 0 ] && [ $wait_sec -lt 21600 ]; then
+            echo "等待 ${wait_sec}s..."
+            sleep $wait_sec
+          elif [ $wait_sec -ge 21600 ]; then
+            echo "⚠️ 延迟超过6h, GitHub Actions会超时, 跳过等待"
+          else
+            echo "目标时间已过, 立即执行"
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: 安装依赖
         run: pip install -r requirements.txt
+
       - name: 设置日期
         id: dt
         run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
       - name: 下载本周数据artifact
         uses: actions/download-artifact@v4
         with:
           name: week-data
           path: week_cache/
         continue-on-error: true
+
       - name: 飞书推送
         env:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
