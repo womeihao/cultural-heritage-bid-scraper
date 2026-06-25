@@ -6,7 +6,8 @@
 """
 
 import os, json, csv, shutil, re, urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta, timezone, timezone, timezone
+BJ_TZ = timezone(timedelta(hours=8))  # 北京时间
 
 STATE_FILE = "week_state.json"
 
@@ -30,10 +31,10 @@ def should_reset(state):
     return state.get("trend_generated", False) and state.get("days_collected", 0) >= 7
 
 def today_str():
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now(BJ_TZ).strftime("%Y-%m-%d")
 
 def yesterday_str():
-    return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    return (datetime.now(BJ_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 def start_week(date_str=None):
     d = date_str or today_str()
