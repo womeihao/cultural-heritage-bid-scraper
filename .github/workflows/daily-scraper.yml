@@ -60,7 +60,7 @@ jobs:
 
       - name: 设置日期
         id: dt
-        run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        run: echo "today=$(TZ='Asia/Shanghai' date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: 下载上周数据artifact
         uses: actions/download-artifact@v4
@@ -138,7 +138,7 @@ jobs:
 
       - name: 设置日期
         id: dt
-        run: echo "today=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        run: echo "today=$(TZ='Asia/Shanghai' date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: 下载本周数据artifact
         uses: actions/download-artifact@v4
