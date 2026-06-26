@@ -685,6 +685,7 @@ class Pipe:
     def csv(items, path):
         fields = ["标题","原文链接","发布时间","公告类型","地区","采购人","代理机构",
                   "供应商","供应商地址","中标金额(万)","数据来源"]
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
             w.writeheader()
@@ -692,6 +693,7 @@ class Pipe:
 
     @staticmethod
     def json(items, path):
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump([it.to_dict() for it in items], f, ensure_ascii=False, indent=2)
 
