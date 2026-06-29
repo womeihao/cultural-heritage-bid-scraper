@@ -85,7 +85,7 @@ jobs:
         env:
           KEYWORD_INPUT: ${{ github.event.inputs.keyword }}
           DAYS_INPUT: ${{ github.event.inputs.days }}
-        run: python ccgp_fast_scraper.py -k "${KEYWORD_INPUT}" -d "${DAYS_INPUT:-1}" -o "output/${{ steps.dt.outputs.today }}/文物数字化"
+        run: python ccgp_fast_scraper.py -k "${KEYWORD_INPUT}" -d "${DAYS_INPUT:-5}" -o "output/${{ steps.dt.outputs.today }}/文物数字化"
 
       - name: 下载附件
         run: python download_attachments.py --date ${{ steps.dt.outputs.today }}
