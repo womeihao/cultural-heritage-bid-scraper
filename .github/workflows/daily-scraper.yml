@@ -20,7 +20,7 @@ on:
         required: false
         default: ''
   schedule:
-    # === 生产配置: 北京时间   17:00 = UTC   09:00 ===
+    # = = = 生产配置: 北京时间   17:00 = UTC   09:00 = = =
     - cron: '0 9 * * *'
 
 jobs:
