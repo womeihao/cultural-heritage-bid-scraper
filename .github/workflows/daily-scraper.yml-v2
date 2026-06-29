@@ -1,4 +1,4 @@
-name: 文物数字化中标信息日报
+name: 文物数字化中标信息日报 v2
 
 on:
   workflow_dispatch:
