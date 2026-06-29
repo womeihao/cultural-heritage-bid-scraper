@@ -105,30 +105,36 @@ def build_card(date_str, items, is_day7=False):
     })
     elements.append({"tag": "hr"})
 
-    for i, item in enumerate(items[:10], 1):
-        title = item.get("标题", "")
-        buyer = item.get("采购人", "N/A")
-        supplier = item.get("供应商", "N/A")
-        amount = item.get("中标金额(万)", "N/A")
-        region = item.get("地区", "")
-        bid_type = item.get("公告类型", "")
-        url = item.get("原文链接", "")
-
-        content = f"**{i}. {title}**\n"
-        content += f"📍 {region} | {bid_type} | 💰 {amount}万\n"
-        content += f"🏢 采购人: {buyer}\n"
-        content += f"🏭 供应商: {supplier}\n"
-        content += f"🤖 AI总结: 见附件zip\n"
-        content += f"🔗 [查看原文公告]({url})"
-
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
-        elements.append({"tag": "hr"})
-
-    if total > 10:
+    if total == 0:
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"📊 还有 {total-10} 条, 完整数据见附件zip"}
+            "text": {"tag": "lark_md", "content": "📝 **当日暂无符合条件的中标/成交公告**"}
         })
+    else:
+        for i, item in enumerate(items[:10], 1):
+            title = item.get("标题", "")
+            buyer = item.get("采购人", "N/A")
+            supplier = item.get("供应商", "N/A")
+            amount = item.get("中标金额(万)", "N/A")
+            region = item.get("地区", "")
+            bid_type = item.get("公告类型", "")
+            url = item.get("原文链接", "")
+
+            content = f"**{i}. {title}**\n"
+            content += f"📍 {region} | {bid_type} | 💰 {amount}万\n"
+            content += f"🏢 采购人: {buyer}\n"
+            content += f"🏭 供应商: {supplier}\n"
+            content += f"🤖 AI总结: 见附件zip\n"
+            content += f"🔗 [查看原文公告]({url})"
+
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
+            elements.append({"tag": "hr"})
+
+        if total > 10:
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"📊 还有 {total-10} 条, 完整数据见附件zip"}
+            })
 
     if is_day7:
         elements.append({
@@ -208,14 +214,16 @@ def run(date_str=None):
         if os.path.exists(p):
             json_path = p
             break
-    if not json_path:
-        log(f"[!] 未找到JSON in {search_dirs}")
-        return
-    work_out = os.path.dirname(json_path)
-    log(f"  数据源: {work_out}")
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        items = json.load(f)
+    if json_path:
+        work_out = os.path.dirname(json_path)
+        with open(json_path, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        log(f"  数据源: {work_out}")
+    else:
+        log(f"[!] 未找到JSON in {search_dirs}，将推送无数据通知")
+        work_out = os.path.join("output", date_str)
+        os.makedirs(work_out, exist_ok=True)
+        items = []
 
     log(f"[*] 推送飞书: {len(items)}条公告 | 第{state.get('days_collected',0)}天 | day7={day7}")
 
